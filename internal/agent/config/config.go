@@ -63,8 +63,14 @@ func (c *AgentConfig) Validate() error {
 	if c.Exchange.SecretKey == "" {
 		return errors.New("agent config exchange.secret_key is required")
 	}
-	if c.Exchange.Passphrase == "" {
-		return errors.New("agent config exchange.passphrase is required")
+	switch strings.ToLower(strings.TrimSpace(c.Exchange.Name)) {
+	case "bitget":
+		if c.Exchange.Passphrase == "" {
+			return errors.New("agent config exchange.passphrase is required for bitget")
+		}
+	case "binance":
+	default:
+		return fmt.Errorf("agent config exchange.name %q is unsupported", c.Exchange.Name)
 	}
 	return nil
 }

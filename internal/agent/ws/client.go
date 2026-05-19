@@ -401,6 +401,9 @@ func (c *AgentClient) executeCommand(ctx context.Context, writer *safeWriter, cm
 		errorMessage = &message
 	} else {
 		executionPtr = &execution
+		if execution.Status != "" {
+			status = execution.Status
+		}
 		if execution.ExchangeTimeMS > 0 {
 			exchangeTimeMS = &execution.ExchangeTimeMS
 		}

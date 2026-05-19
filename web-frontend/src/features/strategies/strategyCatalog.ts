@@ -21,7 +21,7 @@ export const strategyCatalog: StrategyCatalogItem[] = [
     name: "动态均衡策略",
     description: "适合长期现货资产配置，在纪律化投入与风险约束之间保持平衡。",
     color: "#2dd4bf",
-    exchanges: ["Bitget"],
+    exchanges: ["Bitget", "Binance"],
     symbols: ["BTCUSDT"],
     features: { evolution: true, spot: true }
   }

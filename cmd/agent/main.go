@@ -29,7 +29,7 @@ func main() {
 	}
 	defer func() { _ = logger.Sync() }()
 
-	exchangeClient, err := exchange.NewBitgetClient(cfg.Exchange)
+	exchangeClient, err := exchange.NewClient(cfg.Exchange)
 	if err != nil {
 		logger.Fatal("create exchange client", zap.Error(err))
 	}

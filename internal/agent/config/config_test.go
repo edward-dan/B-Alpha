@@ -49,3 +49,27 @@ func TestAgentConfigValidateRequiresSecrets(t *testing.T) {
 		t.Fatal("expected missing secret_key validation error")
 	}
 }
+
+func TestAgentConfigValidateAllowsBinanceWithoutPassphrase(t *testing.T) {
+	cfg := AgentConfig{
+		SaaSURL:  "http://localhost:8080",
+		Email:    "agent@example.com",
+		Password: "secret",
+		Exchange: ExchangeConfig{Name: "binance", APIKey: "key", SecretKey: "secret"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+}
+
+func TestAgentConfigValidateRejectsUnsupportedExchange(t *testing.T) {
+	cfg := AgentConfig{
+		SaaSURL:  "http://localhost:8080",
+		Email:    "agent@example.com",
+		Password: "secret",
+		Exchange: ExchangeConfig{Name: "unknown", APIKey: "key", SecretKey: "secret"},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected unsupported exchange validation error")
+	}
+}
