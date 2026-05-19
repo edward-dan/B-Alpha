@@ -20,10 +20,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { PnLChartSkeleton } from "../../shared/ui/skeletons";
 import { backtestsService, evolutionService, instancesService, ApiRequestError } from "../../shared/services";
-import type { BacktestRun, GeneRecord, StrategyInstance } from "../../types/api";
+import type { BacktestRun } from "../../types/api";
 import { catalogItemForInstance } from "../strategies/strategyCatalog";
 
 type SourceMode = "champion" | "candidate" | "custom";
+type DirectionMode = "long" | "short" | "long_short";
+
+const supportedSymbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"];
+const supportedIntervals = ["1m", "5m", "15m", "1h", "1d"];
+const quickLeverages = [3, 5, 10];
+
+function defaultStartDate() {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - 180);
+  return date.toISOString().slice(0, 10);
+}
+
+function defaultEndDate() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export function BacktestingPage() {
   const { t } = useI18n();
@@ -32,6 +47,12 @@ export function BacktestingPage() {
   const [selectedInstanceId, setSelectedInstanceId] = useState<number | null>(null);
   const [selectedGeneId, setSelectedGeneId] = useState(searchParams.get("genome") ?? "");
   const [customJson, setCustomJson] = useState("");
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(["BTCUSDT"]);
+  const [interval, setSelectedInterval] = useState("1h");
+  const [directionMode, setDirectionMode] = useState<DirectionMode>("long_short");
+  const [leverage, setLeverage] = useState(3);
+  const [startDate, setStartDate] = useState(defaultStartDate);
+  const [endDate, setEndDate] = useState(defaultEndDate);
   const [runId, setRunId] = useState<number | null>(null);
 
   const instancesQuery = useQuery({ queryKey: ["instances"], queryFn: instancesService.list, refetchInterval: 60_000 });
@@ -64,10 +85,18 @@ export function BacktestingPage() {
           : sourceMode === "candidate" && selectedGeneId
             ? Number(selectedGeneId)
             : undefined;
+      const symbols = selectedSymbols.length > 0 ? selectedSymbols : [selectedInstance?.symbol ?? catalog.symbols[0]];
+      const startMs = Date.parse(`${startDate}T00:00:00.000Z`);
+      const endMs = Date.parse(`${endDate}T23:59:59.999Z`);
       return backtestsService.create({
         strategy_id: catalog.strategyId,
-        symbol: selectedInstance?.symbol ?? catalog.symbols[0],
-        interval: selectedInstance?.interval ?? "1h",
+        symbol: symbols[0],
+        symbols,
+        interval,
+        direction_mode: directionMode,
+        leverage,
+        start_time_ms: Number.isFinite(startMs) ? startMs : undefined,
+        end_time_ms: Number.isFinite(endMs) ? endMs : undefined,
         gene_id: geneID,
         param_pack: sourceMode === "custom" ? parsedPack : undefined,
         limit: 20000
@@ -159,6 +188,117 @@ export function BacktestingPage() {
                   placeholder='{"chromosome":{},"spawn_point":{}}'
                 />
               )}
+              <div className="grid gap-4 border-t border-white/[0.06] pt-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-slate-400">{t("backtesting.symbols")}</Label>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {supportedSymbols.map((symbol) => {
+                      const checked = selectedSymbols.includes(symbol);
+                      return (
+                        <label
+                          key={symbol}
+                          className={`flex h-10 items-center gap-2 rounded-md border px-3 text-xs ${
+                            checked ? "border-accent bg-accent/10 text-slate-100" : "border-white/[0.06] text-slate-500"
+                          }`}
+                        >
+                          <input
+                            className="h-4 w-4 accent-teal-400"
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => {
+                              setSelectedSymbols((current) => {
+                                if (event.target.checked) return Array.from(new Set([...current, symbol]));
+                                const next = current.filter((item) => item !== symbol);
+                                return next.length > 0 ? next : current;
+                              });
+                            }}
+                          />
+                          {symbol}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-slate-400">{t("backtesting.interval")}</Label>
+                  <select
+                    className="h-10 w-full rounded-md border border-white/[0.06] bg-slate-950/70 px-3 text-sm text-slate-200 outline-none focus:border-accent"
+                    value={interval}
+                    onChange={(event) => setSelectedInterval(event.target.value)}
+                  >
+                    {supportedIntervals.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-slate-400">{t("backtesting.direction")}</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      ["long", t("backtesting.directionLong")],
+                      ["short", t("backtesting.directionShort")],
+                      ["long_short", t("backtesting.directionBoth")]
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`h-10 rounded-md border px-2 text-xs font-medium ${
+                          directionMode === value ? "border-accent bg-accent/10 text-accent" : "border-white/[0.06] text-slate-500"
+                        }`}
+                        onClick={() => setDirectionMode(value as DirectionMode)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-slate-400">{t("backtesting.leverage")}</Label>
+                  <div className="flex gap-2">
+                    {quickLeverages.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        className={`h-10 w-14 rounded-md border text-xs font-medium ${
+                          leverage === item ? "border-accent bg-accent/10 text-accent" : "border-white/[0.06] text-slate-500"
+                        }`}
+                        onClick={() => setLeverage(item)}
+                      >
+                        {item}x
+                      </button>
+                    ))}
+                    <input
+                      className="h-10 min-w-0 flex-1 rounded-md border border-white/[0.06] bg-slate-950/70 px-3 text-sm text-slate-200 outline-none focus:border-accent"
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={leverage}
+                      onChange={(event) => setLeverage(Math.max(1, Math.min(100, Number(event.target.value) || 1)))}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-slate-400">{t("backtesting.startDate")}</Label>
+                  <input
+                    className="h-10 w-full rounded-md border border-white/[0.06] bg-slate-950/70 px-3 text-sm text-slate-200 outline-none focus:border-accent"
+                    type="date"
+                    value={startDate}
+                    onChange={(event) => setStartDate(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-slate-400">{t("backtesting.endDate")}</Label>
+                  <input
+                    className="h-10 w-full rounded-md border border-white/[0.06] bg-slate-950/70 px-3 text-sm text-slate-200 outline-none focus:border-accent"
+                    type="date"
+                    value={endDate}
+                    onChange={(event) => setEndDate(event.target.value)}
+                  />
+                </div>
+              </div>
               {error && <p className="rounded-lg border border-red-400/20 bg-red-400/10 p-3 text-xs text-red-300">{error}</p>}
             </div>
             <Button
@@ -168,6 +308,7 @@ export function BacktestingPage() {
               disabled={
                 createRun.isPending ||
                 !selectedInstance ||
+                selectedSymbols.length === 0 ||
                 (sourceMode === "champion" && !selectedChampion) ||
                 (sourceMode === "candidate" && !selectedGeneId)
               }
@@ -209,11 +350,13 @@ function BacktestResult({
 
   return (
     <div className="grid gap-4">
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label={t("backtesting.totalReturn")} value={formatPercent(metric(metrics, ["roi", "ROI"]))} />
-        <StatCard label={t("backtesting.alpha")} value={formatPercent(metric(metrics, ["alpha_vs_dca", "alpha"]))} />
         <StatCard label={t("common.maxDrawdown")} value={formatPercent(metric(metrics, ["max_drawdown", "MaxDrawdown"]))} danger />
+        <StatCard label={t("backtesting.winRate")} value={formatPercent(metric(metrics, ["win_rate", "WinRate"]))} />
+        <StatCard label={t("backtesting.profitLossRatio")} value={formatNumber(metric(metrics, ["profit_loss_ratio", "ProfitLossRatio"]))} />
         <StatCard label={t("backtesting.sharpe")} value={formatNumber(metric(metrics, ["sharpe", "Sharpe"]))} />
+        <StatCard label={t("backtesting.tradeCount")} value={formatInteger(metric(metrics, ["trade_count", "TradeCount"]))} />
       </div>
       <Card className="bg-slate-900/30">
         <CardHeader>
@@ -328,6 +471,10 @@ function metric(metrics: Record<string, unknown>, keys: string[]) {
 
 function formatNumber(value: number) {
   return Number.isFinite(value) && value !== 0 ? value.toFixed(2) : "-";
+}
+
+function formatInteger(value: number) {
+  return Number.isFinite(value) && value > 0 ? String(Math.round(value)) : "-";
 }
 
 function windowScore(result: Record<string, unknown> | undefined, key: string) {

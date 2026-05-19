@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"time"
 
 	"bian-trade-go/internal/quant"
@@ -17,14 +18,60 @@ type Config struct {
 	Chromosome  quant.Chromosome
 	SpawnPoint  quant.SpawnPoint
 	Constraints quant.TradingConstraints
+	Leverage    int
+	Direction   DirectionMode
 	Step        StepFunc
 }
 
 type Result struct {
-	FinalEquity   float64 `json:"final_equity"`
-	TotalInjected float64 `json:"total_injected"`
-	ROI           float64 `json:"roi"`
-	MaxDrawdown   float64 `json:"max_drawdown"`
+	FinalEquity     float64             `json:"final_equity"`
+	TotalInjected   float64             `json:"total_injected"`
+	ROI             float64             `json:"roi"`
+	MaxDrawdown     float64             `json:"max_drawdown"`
+	RealizedPnL     float64             `json:"realized_pnl,omitempty"`
+	Fees            float64             `json:"fees,omitempty"`
+	TradeCount      int                 `json:"trade_count,omitempty"`
+	WinRate         float64             `json:"win_rate,omitempty"`
+	ProfitLossRatio float64             `json:"profit_loss_ratio,omitempty"`
+	Sharpe          float64             `json:"sharpe,omitempty"`
+	Orders          []SimulatedOrder    `json:"orders,omitempty"`
+	Positions       []SimulatedPosition `json:"positions,omitempty"`
+}
+
+type DirectionMode string
+
+const (
+	DirectionLong      DirectionMode = "long"
+	DirectionShort     DirectionMode = "short"
+	DirectionLongShort DirectionMode = "long_short"
+)
+
+type SimulatedOrder struct {
+	Symbol         string  `json:"symbol"`
+	Side           string  `json:"side"`
+	Offset         string  `json:"offset"`
+	PositionSide   string  `json:"position_side"`
+	Leverage       int     `json:"leverage"`
+	OrderPrice     float64 `json:"order_price"`
+	ExecutedPrice  float64 `json:"executed_price"`
+	ExecutedQty    float64 `json:"executed_qty"`
+	Fee            float64 `json:"fee"`
+	Status         string  `json:"status"`
+	OrderedAtMs    int64   `json:"ordered_at_ms"`
+	ReasonCode     string  `json:"reason_code,omitempty"`
+	RealizedPnL    float64 `json:"realized_pnl,omitempty"`
+	MarginReleased float64 `json:"margin_released,omitempty"`
+}
+
+type SimulatedPosition struct {
+	Symbol          string  `json:"symbol"`
+	PositionSide    string  `json:"position_side"`
+	AverageEntry    float64 `json:"average_entry"`
+	Quantity        float64 `json:"quantity"`
+	Leverage        int     `json:"leverage"`
+	UsedMargin      float64 `json:"used_margin"`
+	UnrealizedPnL   float64 `json:"unrealized_pnl"`
+	LiquidationHint float64 `json:"liquidation_hint"`
 }
 
 type cashFlow struct {
@@ -40,6 +87,9 @@ func RunBacktest(ctx context.Context, cfg Config) (Result, error) {
 	}
 	if len(cfg.Bars) == 0 {
 		return Result{}, errors.New("run backtest: no bars")
+	}
+	if useMarginLedger(cfg) {
+		return runMarginBacktest(ctx, cfg)
 	}
 
 	evalIndex := firstEvalIndex(cfg.Bars, cfg.EvalStartMs)
@@ -134,6 +184,452 @@ func RunBacktest(ctx context.Context, cfg Config) (Result, error) {
 		ROI:           modifiedDietzROI(initialEquity, finalEquity, flows, start, end),
 		MaxDrawdown:   quant.MaxDrawdown(unitNAV),
 	}, nil
+}
+
+func useMarginLedger(cfg Config) bool {
+	return cfg.Leverage > 1 || normalizeDirection(cfg.Direction) == DirectionShort || normalizeDirection(cfg.Direction) == DirectionLongShort
+}
+
+type marginPosition struct {
+	side     quant.PositionSide
+	qty      float64
+	entry    float64
+	margin   float64
+	leverage int
+}
+
+type marginAccount struct {
+	symbol       string
+	balance      float64
+	frozenMargin float64
+	realizedPnL  float64
+	fees         float64
+	trades       int
+	wins         int
+	grossProfit  float64
+	grossLoss    float64
+	positions    map[quant.PositionSide]*marginPosition
+	orders       []SimulatedOrder
+}
+
+func runMarginBacktest(ctx context.Context, cfg Config) (Result, error) {
+	evalIndex := firstEvalIndex(cfg.Bars, cfg.EvalStartMs)
+	if evalIndex >= len(cfg.Bars) {
+		return Result{}, errors.New("run margin backtest: no bars at or after EvalStartMs")
+	}
+	firstEvalBar := cfg.Bars[evalIndex]
+	if firstEvalBar.Close <= 0 {
+		return Result{}, errors.New("run margin backtest: first evaluation close must be positive")
+	}
+
+	constraints := mergeConstraints(cfg.SpawnPoint, cfg.Constraints)
+	leverage := cfg.Leverage
+	if leverage <= 0 {
+		leverage = 1
+	}
+	direction := normalizeDirection(cfg.Direction)
+	account := marginAccount{
+		symbol:    cfg.SpawnPoint.Symbol,
+		balance:   math.Max(cfg.SpawnPoint.InitialAvailableUSDT, 0),
+		positions: make(map[quant.PositionSide]*marginPosition),
+		orders:    make([]SimulatedOrder, 0),
+	}
+	if account.balance <= 0 {
+		account.balance = totalEquity(initialPortfolio(cfg.SpawnPoint), firstEvalBar.Close)
+	}
+	runtimeState := quant.RuntimeState{}
+	initialEquity := account.equity(firstEvalBar.Close)
+	equityCurve := make([]float64, 0, len(cfg.Bars)-evalIndex)
+
+	for i, bar := range cfg.Bars {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
+		if i < evalIndex || bar.Close <= 0 {
+			continue
+		}
+
+		longQty := 0.0
+		if long := account.positions[quant.PositionSideLong]; long != nil {
+			longQty = long.qty
+		}
+		input := quant.StrategyInput{
+			Symbol:            cfg.SpawnPoint.Symbol,
+			QuoteAsset:        cfg.SpawnPoint.QuoteAsset,
+			Closes:            closesThrough(cfg.Bars, i),
+			Timestamps:        timestampsThrough(cfg.Bars, i),
+			CurrentPrice:      bar.Close,
+			Portfolio:         quant.PortfolioSnapshot{USDTBalance: account.availableBalance(), FloatBTC: longQty},
+			Runtime:           runtimeState,
+			Chromosome:        cfg.Chromosome,
+			SpawnPoint:        cfg.SpawnPoint,
+			Constraints:       constraints,
+			CurrentBucketTime: bar.OpenTime,
+			TotalEquity:       account.equity(bar.Close),
+			SpendableUSDT:     math.Max(0, account.availableBalance()-account.equity(bar.Close)*cfg.Chromosome.MicroReservePct),
+		}
+		output := cfg.Step(input)
+		account.applyMarginIntents(output.MacroIntents, bar, constraints, leverage, direction)
+		account.applyMarginIntents(output.MicroIntents, bar, constraints, leverage, direction)
+		runtimeState = output.NextRuntime
+		equityCurve = append(equityCurve, account.equity(bar.Close))
+	}
+
+	finalPrice := cfg.Bars[len(cfg.Bars)-1].Close
+	finalEquity := account.equity(finalPrice)
+	winRate := 0.0
+	if account.trades > 0 {
+		winRate = float64(account.wins) / float64(account.trades)
+	}
+	plRatio := 0.0
+	if account.grossLoss > 0 {
+		plRatio = account.grossProfit / account.grossLoss
+	}
+	return Result{
+		FinalEquity:     finalEquity,
+		TotalInjected:   initialEquity,
+		ROI:             simpleROI(initialEquity, finalEquity),
+		MaxDrawdown:     quant.MaxDrawdown(equityCurve),
+		RealizedPnL:     account.realizedPnL,
+		Fees:            account.fees,
+		TradeCount:      account.trades,
+		WinRate:         winRate,
+		ProfitLossRatio: plRatio,
+		Sharpe:          sharpeRatio(equityCurve),
+		Orders:          account.orders,
+		Positions:       account.simulatedPositions(finalPrice),
+	}, nil
+}
+
+func normalizeDirection(direction DirectionMode) DirectionMode {
+	switch DirectionMode(strings.ToLower(strings.TrimSpace(string(direction)))) {
+	case DirectionShort:
+		return DirectionShort
+	case DirectionLongShort:
+		return DirectionLongShort
+	default:
+		return DirectionLong
+	}
+}
+
+func (a *marginAccount) applyMarginIntents(intents []quant.TradeIntent, bar quant.Bar, constraints quant.TradingConstraints, leverage int, direction DirectionMode) {
+	for _, intent := range intents {
+		side, offset, ok := inferMarginIntent(intent, direction)
+		if !ok || bar.Close <= 0 {
+			continue
+		}
+		intentLeverage := leverage
+		if intent.Leverage > 0 {
+			intentLeverage = intent.Leverage
+		}
+		if intentLeverage <= 0 {
+			intentLeverage = 1
+		}
+		switch offset {
+		case quant.OrderOffsetOpen:
+			a.openPosition(intent, side, bar, constraints, intentLeverage)
+		case quant.OrderOffsetClose:
+			a.closePosition(intent, side, bar, constraints, intentLeverage)
+		}
+	}
+}
+
+func inferMarginIntent(intent quant.TradeIntent, direction DirectionMode) (quant.PositionSide, quant.OrderOffset, bool) {
+	side := intent.PositionSide
+	if side == "" {
+		if direction == DirectionShort {
+			side = quant.PositionSideShort
+		} else {
+			side = quant.PositionSideLong
+		}
+	}
+	offset := intent.Offset
+	if offset == "" {
+		switch side {
+		case quant.PositionSideLong:
+			if intent.Action == quant.ActionBuy {
+				offset = quant.OrderOffsetOpen
+			} else {
+				offset = quant.OrderOffsetClose
+			}
+		case quant.PositionSideShort:
+			if intent.Action == quant.ActionSell {
+				offset = quant.OrderOffsetOpen
+			} else {
+				offset = quant.OrderOffsetClose
+			}
+		default:
+			return "", "", false
+		}
+	}
+	if direction == DirectionLong && side == quant.PositionSideShort {
+		return "", "", false
+	}
+	if direction == DirectionShort && side == quant.PositionSideLong {
+		return "", "", false
+	}
+	if offset != quant.OrderOffsetOpen && offset != quant.OrderOffsetClose {
+		return "", "", false
+	}
+	return side, offset, true
+}
+
+func (a *marginAccount) openPosition(intent quant.TradeIntent, side quant.PositionSide, bar quant.Bar, constraints quant.TradingConstraints, leverage int) {
+	execPrice := executionPrice(side, quant.OrderOffsetOpen, bar.Close, constraints.SlippagePct)
+	qty, notional := intentNotional(intent, execPrice, leverage, true)
+	if notional < constraints.MinOrderUSDT || execPrice <= 0 {
+		return
+	}
+	maxNotional := a.availableBalance() / (1/float64(leverage) + math.Max(constraints.FeeRate, 0))
+	if maxNotional <= 0 {
+		return
+	}
+	if notional > maxNotional {
+		notional = maxNotional
+		qty = notional / execPrice
+	}
+	qty = floorToStep(qty, constraints.LotStep)
+	if constraints.LotMin > 0 && qty < constraints.LotMin {
+		return
+	}
+	if qty <= 0 {
+		return
+	}
+	notional = qty * execPrice
+	margin := notional / float64(leverage)
+	fee := notional * math.Max(constraints.FeeRate, 0)
+	if margin+fee > a.availableBalance() {
+		return
+	}
+
+	position := a.positions[side]
+	if position == nil {
+		position = &marginPosition{side: side, leverage: leverage}
+		a.positions[side] = position
+	}
+	nextQty := position.qty + qty
+	if nextQty <= 0 {
+		return
+	}
+	position.entry = (position.entry*position.qty + execPrice*qty) / nextQty
+	position.qty = nextQty
+	position.margin += margin
+	position.leverage = leverage
+	a.balance -= margin + fee
+	a.frozenMargin += margin
+	a.fees += fee
+	a.orders = append(a.orders, SimulatedOrder{
+		Symbol:        a.symbol,
+		Side:          sideOpenAction(side),
+		Offset:        string(quant.OrderOffsetOpen),
+		PositionSide:  string(side),
+		Leverage:      leverage,
+		OrderPrice:    bar.Close,
+		ExecutedPrice: execPrice,
+		ExecutedQty:   qty,
+		Fee:           fee,
+		Status:        "filled",
+		OrderedAtMs:   bar.OpenTime,
+		ReasonCode:    intent.ReasonCode,
+	})
+}
+
+func (a *marginAccount) closePosition(intent quant.TradeIntent, side quant.PositionSide, bar quant.Bar, constraints quant.TradingConstraints, leverage int) {
+	position := a.positions[side]
+	if position == nil || position.qty <= 0 {
+		return
+	}
+	execPrice := executionPrice(side, quant.OrderOffsetClose, bar.Close, constraints.SlippagePct)
+	qty, notional := intentNotional(intent, execPrice, leverage, false)
+	if qty <= 0 {
+		qty = position.qty
+		notional = qty * execPrice
+	}
+	qty = math.Min(qty, position.qty)
+	qty = floorToStep(qty, constraints.LotStep)
+	if constraints.LotMin > 0 && qty < constraints.LotMin {
+		return
+	}
+	if qty <= 0 {
+		return
+	}
+	notional = qty * execPrice
+	if notional < constraints.MinOrderUSDT {
+		return
+	}
+	released := position.margin * (qty / position.qty)
+	grossPnL := marginPnL(side, position.entry, execPrice, qty)
+	fee := notional * math.Max(constraints.FeeRate, 0)
+	netPnL := grossPnL - fee
+
+	position.qty -= qty
+	position.margin -= released
+	a.frozenMargin -= released
+	a.balance += released + netPnL
+	a.realizedPnL += netPnL
+	a.fees += fee
+	a.trades++
+	if netPnL > 0 {
+		a.wins++
+		a.grossProfit += netPnL
+	} else if netPnL < 0 {
+		a.grossLoss += math.Abs(netPnL)
+	}
+	if position.qty <= 0 {
+		delete(a.positions, side)
+	}
+	a.orders = append(a.orders, SimulatedOrder{
+		Symbol:         a.symbol,
+		Side:           sideCloseAction(side),
+		Offset:         string(quant.OrderOffsetClose),
+		PositionSide:   string(side),
+		Leverage:       leverage,
+		OrderPrice:     bar.Close,
+		ExecutedPrice:  execPrice,
+		ExecutedQty:    qty,
+		Fee:            fee,
+		Status:         "filled",
+		OrderedAtMs:    bar.OpenTime,
+		ReasonCode:     intent.ReasonCode,
+		RealizedPnL:    netPnL,
+		MarginReleased: released,
+	})
+}
+
+func intentNotional(intent quant.TradeIntent, price float64, leverage int, opening bool) (float64, float64) {
+	if price <= 0 {
+		return 0, 0
+	}
+	if intent.QtyAsset > 0 {
+		qty := math.Max(intent.QtyAsset, 0)
+		return qty, qty * price
+	}
+	if intent.AmountUSDT > 0 {
+		notional := math.Max(intent.AmountUSDT, 0)
+		if opening {
+			notional *= float64(leverage)
+		}
+		return notional / price, notional
+	}
+	return 0, 0
+}
+
+func executionPrice(side quant.PositionSide, offset quant.OrderOffset, price float64, slippage float64) float64 {
+	slip := math.Max(slippage, 0)
+	switch {
+	case side == quant.PositionSideLong && offset == quant.OrderOffsetOpen:
+		return price * (1 + slip)
+	case side == quant.PositionSideLong && offset == quant.OrderOffsetClose:
+		return price * (1 - slip)
+	case side == quant.PositionSideShort && offset == quant.OrderOffsetOpen:
+		return price * (1 - slip)
+	case side == quant.PositionSideShort && offset == quant.OrderOffsetClose:
+		return price * (1 + slip)
+	default:
+		return price
+	}
+}
+
+func marginPnL(side quant.PositionSide, entry float64, exit float64, qty float64) float64 {
+	if side == quant.PositionSideShort {
+		return (entry - exit) * qty
+	}
+	return (exit - entry) * qty
+}
+
+func sideOpenAction(side quant.PositionSide) string {
+	if side == quant.PositionSideShort {
+		return string(quant.ActionSell)
+	}
+	return string(quant.ActionBuy)
+}
+
+func sideCloseAction(side quant.PositionSide) string {
+	if side == quant.PositionSideShort {
+		return string(quant.ActionBuy)
+	}
+	return string(quant.ActionSell)
+}
+
+func (a *marginAccount) availableBalance() float64 {
+	return math.Max(a.balance, 0)
+}
+
+func (a *marginAccount) equity(price float64) float64 {
+	equity := a.balance + a.frozenMargin
+	for _, position := range a.positions {
+		equity += marginPnL(position.side, position.entry, price, position.qty)
+	}
+	return equity
+}
+
+func (a *marginAccount) simulatedPositions(price float64) []SimulatedPosition {
+	out := make([]SimulatedPosition, 0, len(a.positions))
+	for _, position := range a.positions {
+		if position.qty <= 0 {
+			continue
+		}
+		out = append(out, SimulatedPosition{
+			Symbol:          a.symbol,
+			PositionSide:    string(position.side),
+			AverageEntry:    position.entry,
+			Quantity:        position.qty,
+			Leverage:        position.leverage,
+			UsedMargin:      position.margin,
+			UnrealizedPnL:   marginPnL(position.side, position.entry, price, position.qty),
+			LiquidationHint: liquidationHint(position),
+		})
+	}
+	return out
+}
+
+func liquidationHint(position *marginPosition) float64 {
+	if position == nil || position.leverage <= 0 {
+		return 0
+	}
+	move := position.entry / float64(position.leverage)
+	if position.side == quant.PositionSideShort {
+		return position.entry + move
+	}
+	return math.Max(0, position.entry-move)
+}
+
+func simpleROI(initialEquity, finalEquity float64) float64 {
+	if initialEquity <= 0 {
+		return 0
+	}
+	return (finalEquity - initialEquity) / initialEquity
+}
+
+func sharpeRatio(equityCurve []float64) float64 {
+	if len(equityCurve) < 3 {
+		return 0
+	}
+	returns := make([]float64, 0, len(equityCurve)-1)
+	for i := 1; i < len(equityCurve); i++ {
+		if equityCurve[i-1] <= 0 {
+			continue
+		}
+		returns = append(returns, (equityCurve[i]-equityCurve[i-1])/equityCurve[i-1])
+	}
+	if len(returns) < 2 {
+		return 0
+	}
+	mean := 0.0
+	for _, value := range returns {
+		mean += value
+	}
+	mean /= float64(len(returns))
+	variance := 0.0
+	for _, value := range returns {
+		diff := value - mean
+		variance += diff * diff
+	}
+	std := math.Sqrt(variance / float64(len(returns)-1))
+	if std <= 0 {
+		return 0
+	}
+	return mean / std * math.Sqrt(float64(len(returns)))
 }
 
 func firstEvalIndex(bars []quant.Bar, evalStartMs int64) int {

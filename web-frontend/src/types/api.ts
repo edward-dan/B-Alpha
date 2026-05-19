@@ -200,7 +200,12 @@ export type CreateEvolutionTaskPayload = {
 export type CreateBacktestPayload = {
   strategy_id: string;
   symbol: string;
+  symbols?: string[];
   interval: string;
+  direction_mode?: "long" | "short" | "long_short";
+  leverage?: number;
+  start_time_ms?: number;
+  end_time_ms?: number;
   gene_id?: number;
   param_pack?: Record<string, unknown>;
   limit?: number;

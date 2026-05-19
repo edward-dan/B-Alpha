@@ -161,6 +161,20 @@ const (
 	BacktestRunFailed    BacktestRunStatus = "failed"
 )
 
+type BacktestPositionSide string
+
+const (
+	BacktestPositionLong  BacktestPositionSide = "LONG"
+	BacktestPositionShort BacktestPositionSide = "SHORT"
+)
+
+type BacktestOffset string
+
+const (
+	BacktestOffsetOpen  BacktestOffset = "OPEN"
+	BacktestOffsetClose BacktestOffset = "CLOSE"
+)
+
 type User struct {
 	ID                    uint       `gorm:"primaryKey"`
 	CreatedAt             time.Time  `gorm:"not null"`
@@ -345,4 +359,104 @@ type KLine struct {
 	Low       Decimal   `gorm:"type:numeric(36,18);not null"`
 	Close     Decimal   `gorm:"type:numeric(36,18);not null"`
 	Volume    Decimal   `gorm:"type:numeric(36,18);not null"`
+	CloseTime time.Time `gorm:"index"`
+}
+
+func (KLine) TableName() string {
+	return "market_klines"
+}
+
+type BTAccount struct {
+	ID               uint      `gorm:"primaryKey"`
+	CreatedAt        time.Time `gorm:"not null"`
+	UpdatedAt        time.Time `gorm:"not null"`
+	BacktestRunID    uint      `gorm:"not null;index"`
+	InitialEquity    Decimal   `gorm:"type:numeric(36,18);not null;default:0"`
+	CurrentEquity    Decimal   `gorm:"type:numeric(36,18);not null;default:0"`
+	AvailableBalance Decimal   `gorm:"type:numeric(36,18);not null;default:0"`
+	FrozenMargin     Decimal   `gorm:"type:numeric(36,18);not null;default:0"`
+	RealizedPnL      Decimal   `gorm:"type:numeric(36,18);not null;default:0"`
+}
+
+func (BTAccount) TableName() string {
+	return "bt_account"
+}
+
+type BTOrder struct {
+	ID             uint                 `gorm:"primaryKey"`
+	CreatedAt      time.Time            `gorm:"not null"`
+	UpdatedAt      time.Time            `gorm:"not null"`
+	BacktestRunID  uint                 `gorm:"not null;index"`
+	Symbol         string               `gorm:"size:32;not null;index"`
+	Side           string               `gorm:"size:16;not null;index"`
+	OffsetFlag     BacktestOffset       `gorm:"column:offset_flag;type:varchar(16);not null;index;check:bt_order_offset_check,offset_flag = 'OPEN' OR offset_flag = 'CLOSE'"`
+	PositionSide   BacktestPositionSide `gorm:"type:varchar(16);not null;index;check:bt_order_position_side_check,position_side = 'LONG' OR position_side = 'SHORT'"`
+	Leverage       int                  `gorm:"not null;default:1"`
+	OrderPrice     Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+	ExecutedPrice  Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+	ExecutedQty    Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+	Fee            Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+	Status         string               `gorm:"size:32;not null;index"`
+	OrderedAt      time.Time            `gorm:"not null;index"`
+	ReasonCode     string               `gorm:"size:128;index"`
+	RealizedPnL    Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+	MarginReleased Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+}
+
+func (BTOrder) TableName() string {
+	return "bt_orders"
+}
+
+type BTPosition struct {
+	ID              uint                 `gorm:"primaryKey"`
+	CreatedAt       time.Time            `gorm:"not null"`
+	UpdatedAt       time.Time            `gorm:"not null"`
+	BacktestRunID   uint                 `gorm:"not null;index:idx_bt_position_run_symbol_side"`
+	Symbol          string               `gorm:"size:32;not null;index:idx_bt_position_run_symbol_side"`
+	PositionSide    BacktestPositionSide `gorm:"type:varchar(16);not null;index:idx_bt_position_run_symbol_side;check:bt_position_side_check,position_side = 'LONG' OR position_side = 'SHORT'"`
+	AverageEntry    Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+	Quantity        Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+	Leverage        int                  `gorm:"not null;default:1"`
+	UsedMargin      Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+	UnrealizedPnL   Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+	LiquidationHint Decimal              `gorm:"type:numeric(36,18);not null;default:0"`
+}
+
+func (BTPosition) TableName() string {
+	return "bt_positions"
+}
+
+type BTTradeLog struct {
+	ID            uint      `gorm:"primaryKey"`
+	CreatedAt     time.Time `gorm:"not null"`
+	UpdatedAt     time.Time `gorm:"not null"`
+	BacktestRunID uint      `gorm:"not null;index"`
+	Timestamp     time.Time `gorm:"not null;index"`
+	Symbol        string    `gorm:"size:32;not null;index"`
+	Level         string    `gorm:"size:16;not null;index"`
+	TriggerDetail string    `gorm:"type:text"`
+	ErrorMessage  string    `gorm:"type:text"`
+}
+
+func (BTTradeLog) TableName() string {
+	return "bt_trade_logs"
+}
+
+type BTReport struct {
+	ID              uint      `gorm:"primaryKey"`
+	CreatedAt       time.Time `gorm:"not null"`
+	UpdatedAt       time.Time `gorm:"not null"`
+	BacktestRunID   uint      `gorm:"not null;uniqueIndex"`
+	ParameterSnap   JSONB     `gorm:"type:jsonb;not null"`
+	TotalReturn     Decimal   `gorm:"type:numeric(36,18);not null;default:0"`
+	MaxDrawdown     Decimal   `gorm:"type:numeric(18,12);not null;default:0"`
+	WinRate         Decimal   `gorm:"type:numeric(18,12);not null;default:0"`
+	ProfitLossRatio Decimal   `gorm:"type:numeric(36,18);not null;default:0"`
+	SharpeRatio     Decimal   `gorm:"type:numeric(36,18);not null;default:0"`
+	TradeCount      int       `gorm:"not null;default:0"`
+	ExecutionMs     int64     `gorm:"not null;default:0"`
+}
+
+func (BTReport) TableName() string {
+	return "bt_reports"
 }

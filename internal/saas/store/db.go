@@ -47,6 +47,11 @@ func NewDB(cfg config.DatabaseConfig) (*DB, error) {
 		&EvolutionTask{},
 		&BacktestRun{},
 		&KLine{},
+		&BTAccount{},
+		&BTOrder{},
+		&BTPosition{},
+		&BTTradeLog{},
+		&BTReport{},
 	); err != nil {
 		return nil, fmt.Errorf("auto migrate postgres models: %w", err)
 	}

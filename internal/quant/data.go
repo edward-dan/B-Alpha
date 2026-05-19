@@ -18,6 +18,20 @@ type EngineType string
 
 type LotType string
 
+type PositionSide string
+
+const (
+	PositionSideLong  PositionSide = "LONG"
+	PositionSideShort PositionSide = "SHORT"
+)
+
+type OrderOffset string
+
+const (
+	OrderOffsetOpen  OrderOffset = "OPEN"
+	OrderOffsetClose OrderOffset = "CLOSE"
+)
+
 // Bar is one fully closed OHLCV candle.
 type Bar struct {
 	OpenTime int64   `json:"open_time"`
@@ -75,12 +89,15 @@ type StrategyInput struct {
 
 // TradeIntent is a strategy output intent. It does not execute I/O.
 type TradeIntent struct {
-	Action     TradeAction `json:"action"`
-	Engine     EngineType  `json:"engine"`
-	LotType    LotType     `json:"lot_type"`
-	AmountUSDT float64     `json:"amount_usdt,omitempty"`
-	QtyAsset   float64     `json:"qty_asset,omitempty"`
-	ReasonCode string      `json:"reason_code"`
+	Action       TradeAction  `json:"action"`
+	Engine       EngineType   `json:"engine"`
+	LotType      LotType      `json:"lot_type"`
+	PositionSide PositionSide `json:"position_side,omitempty"`
+	Offset       OrderOffset  `json:"offset,omitempty"`
+	Leverage     int          `json:"leverage,omitempty"`
+	AmountUSDT   float64      `json:"amount_usdt,omitempty"`
+	QtyAsset     float64      `json:"qty_asset,omitempty"`
+	ReasonCode   string       `json:"reason_code"`
 }
 
 // LedgerConversion expresses a semantic ledger conversion such as DeadBTC to FloatBTC.
