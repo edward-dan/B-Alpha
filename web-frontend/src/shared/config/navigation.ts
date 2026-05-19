@@ -25,6 +25,6 @@ export const navItems: NavItem[] = [
   { to: "/instances", labelKey: "nav.instances", icon: PlusCircle, placement: "main", feature: "dashboard" },
   { to: "/evolution", labelKey: "nav.evolution", icon: FlaskConical, placement: "main", feature: "strategies" },
   { to: "/agents", labelKey: "nav.agents", icon: MonitorCog, placement: "main", feature: "agents" },
-  { to: "/backtesting", labelKey: "nav.backtesting", icon: BarChart3, placement: "main", feature: "backtesting" },
+  { to: "/backtesting", labelKey: "nav.backtesting", icon: BarChart3, placement: "main" },
   { to: "/settings", labelKey: "nav.settings", icon: Settings, placement: "footer", feature: "settings" }
 ];

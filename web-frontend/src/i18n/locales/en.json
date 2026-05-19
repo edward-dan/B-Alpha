@@ -151,6 +151,8 @@
   "backtesting.sourceChampion": "Use champion",
   "backtesting.sourceCandidate": "Use candidate",
   "backtesting.sourceCustom": "Custom JSON",
+  "backtesting.modeLockedTitle": "Current mode only exposes production monitoring",
+  "backtesting.modeLockedDescription": "Backtesting requires Lab or Dev mode. After switching modes, this page enables the start button while keeping live execution isolated.",
   "backtesting.symbols": "Symbols",
   "backtesting.interval": "Market period",
   "backtesting.direction": "Direction",

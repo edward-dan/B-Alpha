@@ -16,6 +16,7 @@ import { Button } from "../../components/ui/button";
 import { Label } from "../../components/ui/label";
 import { useI18n } from "../../i18n/useI18n";
 import { formatCurrency, formatPercent, toNumber } from "../../lib/format";
+import { useSystemStatusStore } from "../../stores/systemStatusStore";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../shared/ui/Card";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { PnLChartSkeleton } from "../../shared/ui/skeletons";
@@ -54,16 +55,26 @@ export function BacktestingPage() {
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
   const [runId, setRunId] = useState<number | null>(null);
+  const systemStatus = useSystemStatusStore((state) => state.status);
+  const appRole = systemStatus?.app_role ?? "dev";
+  const canRunBacktests = appRole === "lab" || appRole === "dev";
 
   const instancesQuery = useQuery({ queryKey: ["instances"], queryFn: instancesService.list, refetchInterval: 60_000 });
-  const genomesQuery = useQuery({ queryKey: ["evolution-genomes"], queryFn: () => evolutionService.genomes(), refetchInterval: 30_000 });
+  const genomesQuery = useQuery({
+    queryKey: ["evolution-genomes"],
+    queryFn: () => evolutionService.genomes(),
+    enabled: canRunBacktests,
+    refetchInterval: 30_000
+  });
   const instances = instancesQuery.data?.instances ?? [];
   const genomes = genomesQuery.data?.genomes ?? [];
   const championBySymbol = new Map(genomes.filter((gene) => gene.role === "champion").map((gene) => [gene.symbol, gene]));
-  const eligibleInstances = instances.filter((instance) => championBySymbol.has(instance.symbol));
+  const eligibleInstances = canRunBacktests ? instances.filter((instance) => championBySymbol.has(instance.symbol)) : instances;
   const selectedInstance = eligibleInstances.find((item) => item.id === selectedInstanceId) ?? eligibleInstances[0] ?? null;
-  const selectedChampion = selectedInstance ? championBySymbol.get(selectedInstance.symbol) ?? null : null;
-  const candidates = genomes.filter((gene) => gene.role === "challenger" && (!selectedInstance || gene.symbol === selectedInstance.symbol));
+  const selectedChampion = canRunBacktests && selectedInstance ? championBySymbol.get(selectedInstance.symbol) ?? null : null;
+  const candidates = canRunBacktests
+    ? genomes.filter((gene) => gene.role === "challenger" && (!selectedInstance || gene.symbol === selectedInstance.symbol))
+    : [];
 
   const runQuery = useQuery({
     queryKey: ["backtest-run", runId],
@@ -145,6 +156,12 @@ export function BacktestingPage() {
           </div>
         </CardHeader>
         <CardContent>
+          {!canRunBacktests && (
+            <div className="mb-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+              <p className="font-medium text-amber-50">{t("backtesting.modeLockedTitle")}</p>
+              <p className="mt-1 text-xs leading-5 text-amber-100/75">{t("backtesting.modeLockedDescription")}</p>
+            </div>
+          )}
           <form className="grid gap-4 lg:grid-cols-[1fr_auto]" onSubmit={submit}>
             <div className="space-y-3">
               <Label className="text-xs uppercase tracking-wider text-slate-400">{t("backtesting.source")}</Label>
@@ -307,6 +324,7 @@ export function BacktestingPage() {
               variant="primary"
               disabled={
                 createRun.isPending ||
+                !canRunBacktests ||
                 !selectedInstance ||
                 selectedSymbols.length === 0 ||
                 (sourceMode === "champion" && !selectedChampion) ||

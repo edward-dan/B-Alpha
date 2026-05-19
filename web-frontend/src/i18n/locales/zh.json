@@ -151,6 +151,8 @@
   "backtesting.sourceChampion": "使用当前最优参数",
   "backtesting.sourceCandidate": "使用指定候选参数",
   "backtesting.sourceCustom": "自定义 JSON",
+  "backtesting.modeLockedTitle": "当前运行模式只开放生产监控",
+  "backtesting.modeLockedDescription": "回测需要以 Lab 或 Dev 模式启动服务。切换后这里会开放开始回测按钮，并继续保持真实交易执行端隔离。",
   "backtesting.symbols": "交易对",
   "backtesting.interval": "行情周期",
   "backtesting.direction": "交易方向",

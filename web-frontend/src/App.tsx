@@ -71,11 +71,7 @@ export function App() {
         />
         <Route
           path="/backtesting"
-          element={
-            <FeatureRoute feature="backtesting">
-              <BacktestingPage />
-            </FeatureRoute>
-          }
+          element={<BacktestingPage />}
         />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
