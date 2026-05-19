@@ -351,9 +351,9 @@ type KLine struct {
 	ID        uint      `gorm:"primaryKey"`
 	CreatedAt time.Time `gorm:"not null"`
 	UpdatedAt time.Time `gorm:"not null"`
-	Symbol    string    `gorm:"size:32;not null;uniqueIndex:idx_klines_symbol_interval_open_time"`
-	Interval  string    `gorm:"size:16;not null;uniqueIndex:idx_klines_symbol_interval_open_time"`
-	OpenTime  time.Time `gorm:"not null;uniqueIndex:idx_klines_symbol_interval_open_time"`
+	Symbol    string    `gorm:"size:32;not null;uniqueIndex:idx_klines_symbol_interval_open_time;uniqueIndex:idx_market_klines_symbol_interval_open_time_unique"`
+	Interval  string    `gorm:"size:16;not null;uniqueIndex:idx_klines_symbol_interval_open_time;uniqueIndex:idx_market_klines_symbol_interval_open_time_unique"`
+	OpenTime  time.Time `gorm:"not null;uniqueIndex:idx_klines_symbol_interval_open_time;uniqueIndex:idx_market_klines_symbol_interval_open_time_unique"`
 	Open      Decimal   `gorm:"type:numeric(36,18);not null"`
 	High      Decimal   `gorm:"type:numeric(36,18);not null"`
 	Low       Decimal   `gorm:"type:numeric(36,18);not null"`
