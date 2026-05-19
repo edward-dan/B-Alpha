@@ -23,6 +23,8 @@ type BacktestHandler struct {
 	db *gorm.DB
 }
 
+const backtestArtifactBatchSize = 500
+
 type createBacktestRequest struct {
 	StrategyID    string                   `json:"strategy_id"`
 	Symbol        string                   `json:"symbol"`
@@ -56,6 +58,21 @@ type dataCoverage struct {
 	EvalStartMs     int64  `json:"eval_start_ms"`
 	Symbol          string `json:"symbol"`
 	Interval        string `json:"interval"`
+}
+
+type backtestRunResponse struct {
+	ID         uint                    `json:"id"`
+	CreatedAt  time.Time               `json:"created_at"`
+	UpdatedAt  time.Time               `json:"updated_at"`
+	StrategyID string                  `json:"strategy_id"`
+	Symbol     string                  `json:"symbol"`
+	Interval   string                  `json:"interval"`
+	Status     store.BacktestRunStatus `json:"status"`
+	Request    store.JSONB             `json:"request"`
+	Result     store.JSONB             `json:"result"`
+	Error      string                  `json:"error,omitempty"`
+	StartedAt  *time.Time              `json:"started_at,omitempty"`
+	FinishedAt *time.Time              `json:"finished_at,omitempty"`
 }
 
 func NewBacktestHandler(db *gorm.DB) *BacktestHandler {
@@ -122,7 +139,7 @@ func (h *BacktestHandler) CreateBacktest(c *gin.Context) {
 		run.Status = store.BacktestRunFailed
 		run.Error = err.Error()
 		run.FinishedAt = &finishedAt
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "backtest": run})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "backtest": toBacktestRunResponse(run)})
 		return
 	}
 
@@ -148,7 +165,7 @@ func (h *BacktestHandler) CreateBacktest(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"backtest": run})
+	c.JSON(http.StatusCreated, gin.H{"backtest": toBacktestRunResponse(run)})
 }
 
 func (h *BacktestHandler) GetBacktest(c *gin.Context) {
@@ -172,7 +189,24 @@ func (h *BacktestHandler) GetBacktest(c *gin.Context) {
 		c.JSON(statusForDBError(err), gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"backtest": run})
+	c.JSON(http.StatusOK, gin.H{"backtest": toBacktestRunResponse(run)})
+}
+
+func toBacktestRunResponse(run store.BacktestRun) backtestRunResponse {
+	return backtestRunResponse{
+		ID:         run.ID,
+		CreatedAt:  run.CreatedAt,
+		UpdatedAt:  run.UpdatedAt,
+		StrategyID: run.StrategyID,
+		Symbol:     run.Symbol,
+		Interval:   run.Interval,
+		Status:     run.Status,
+		Request:    run.Request,
+		Result:     run.Result,
+		Error:      run.Error,
+		StartedAt:  run.StartedAt,
+		FinishedAt: run.FinishedAt,
+	}
 }
 
 func (h *BacktestHandler) resolveBacktestRequest(c *gin.Context, req createBacktestRequest) (example.Params, createBacktestRequest, error) {
@@ -349,6 +383,7 @@ func combineBacktestResults(left backtest.Result, right backtest.Result) backtes
 	left.RealizedPnL += right.RealizedPnL
 	left.Fees += right.Fees
 	left.TradeCount += right.TradeCount
+	left.EquityCurve = combineBacktestCurves(left.EquityCurve, right.EquityCurve)
 	left.Orders = append(left.Orders, right.Orders...)
 	left.Positions = append(left.Positions, right.Positions...)
 	if left.TradeCount > 0 {
@@ -362,6 +397,36 @@ func combineBacktestResults(left backtest.Result, right backtest.Result) backtes
 		left.Sharpe = right.Sharpe
 	}
 	return left
+}
+
+func combineBacktestCurves(left []backtest.CurvePoint, right []backtest.CurvePoint) []backtest.CurvePoint {
+	if len(left) == 0 {
+		return append([]backtest.CurvePoint(nil), right...)
+	}
+	if len(right) == 0 {
+		return left
+	}
+	totals := make(map[string]float64, len(left)+len(right))
+	for _, point := range left {
+		if point.Time != "" {
+			totals[point.Time] += point.Value
+		}
+	}
+	for _, point := range right {
+		if point.Time != "" {
+			totals[point.Time] += point.Value
+		}
+	}
+	times := make([]string, 0, len(totals))
+	for ts := range totals {
+		times = append(times, ts)
+	}
+	sort.Strings(times)
+	combined := make([]backtest.CurvePoint, 0, len(times))
+	for _, ts := range times {
+		combined = append(combined, backtest.CurvePoint{Time: ts, Value: totals[ts]})
+	}
+	return combined
 }
 
 func (h *BacktestHandler) ensureMarketData(c *gin.Context, req createBacktestRequest) ([]marketdata.CoverageReport, error) {
@@ -431,7 +496,7 @@ func (h *BacktestHandler) persistBacktestArtifacts(c *gin.Context, runID uint, r
 					MarginReleased: decimalFromFloat(order.MarginReleased),
 				})
 			}
-			if err := tx.Create(&orders).Error; err != nil {
+			if err := tx.CreateInBatches(orders, backtestArtifactBatchSize).Error; err != nil {
 				return err
 			}
 		}
@@ -450,7 +515,7 @@ func (h *BacktestHandler) persistBacktestArtifacts(c *gin.Context, runID uint, r
 					LiquidationHint: decimalFromFloat(position.LiquidationHint),
 				})
 			}
-			if err := tx.Create(&positions).Error; err != nil {
+			if err := tx.CreateInBatches(positions, backtestArtifactBatchSize).Error; err != nil {
 				return err
 			}
 		}

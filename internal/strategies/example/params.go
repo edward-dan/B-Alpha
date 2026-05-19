@@ -16,9 +16,10 @@ func DefaultParams() Params {
 	return Params{
 		Chromosome: quant.DefaultSeedChromosome,
 		SpawnPoint: quant.SpawnPoint{
-			Symbol:       "BTCUSDT",
-			QuoteAsset:   "USDT",
-			BaseInterval: "1h",
+			Symbol:               "BTCUSDT",
+			QuoteAsset:           "USDT",
+			BaseInterval:         "1h",
+			InitialAvailableUSDT: 10000,
 			Policy: quant.SpawnPolicy{
 				MonthlyInjectUSDT:    0,
 				DeadlineSpendablePct: 0.50,

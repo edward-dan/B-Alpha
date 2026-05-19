@@ -46,6 +46,12 @@ func TestRunBacktestDeterministicForSameInputs(t *testing.T) {
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("same backtest inputs should produce identical result:\nfirst=%#v\nsecond=%#v", first, second)
 	}
+	if len(first.EquityCurve) != len(bars) {
+		t.Fatalf("expected one equity point per replayed bar, got %d want %d", len(first.EquityCurve), len(bars))
+	}
+	if first.EquityCurve[0].Time == "" || first.EquityCurve[0].Value <= 0 {
+		t.Fatalf("unexpected first equity point: %#v", first.EquityCurve[0])
+	}
 }
 
 func TestRunBacktestSupportsExplicitShortMarginLedger(t *testing.T) {
@@ -108,6 +114,9 @@ func TestRunBacktestSupportsExplicitShortMarginLedger(t *testing.T) {
 	}
 	if len(result.Orders) != 2 || result.Orders[0].PositionSide != "SHORT" || result.Orders[1].Offset != "CLOSE" {
 		t.Fatalf("unexpected simulated short orders: %#v", result.Orders)
+	}
+	if len(result.EquityCurve) != len(bars) {
+		t.Fatalf("expected margin equity curve for each bar, got %d want %d", len(result.EquityCurve), len(bars))
 	}
 }
 

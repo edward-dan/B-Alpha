@@ -4,7 +4,7 @@ import { cn } from "../../lib/cn";
 export type StatusBadgeStatus = "running" | "stopped" | "error" | "halted" | "queued" | "succeeded" | "failed" | "canceled";
 
 type StatusBadgeProps = {
-  status: StatusBadgeStatus | string;
+  status?: StatusBadgeStatus | string | null;
   label?: string;
   className?: string;
 };
@@ -20,8 +20,8 @@ const toneClasses: Record<StatusBadgeStatus, string> = {
   canceled: "border-slate-500/20 bg-slate-500/10 text-slate-400 before:bg-slate-500"
 };
 
-function normalizeStatus(status: string): StatusBadgeStatus {
-  switch (status.toLowerCase()) {
+function normalizeStatus(status?: string | null): StatusBadgeStatus {
+  switch ((status ?? "").toLowerCase()) {
     case "running":
     case "run":
       return "running";

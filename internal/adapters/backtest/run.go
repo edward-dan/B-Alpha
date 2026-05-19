@@ -28,6 +28,7 @@ type Result struct {
 	TotalInjected   float64             `json:"total_injected"`
 	ROI             float64             `json:"roi"`
 	MaxDrawdown     float64             `json:"max_drawdown"`
+	EquityCurve     []CurvePoint        `json:"equity_curve,omitempty"`
 	RealizedPnL     float64             `json:"realized_pnl,omitempty"`
 	Fees            float64             `json:"fees,omitempty"`
 	TradeCount      int                 `json:"trade_count,omitempty"`
@@ -36,6 +37,11 @@ type Result struct {
 	Sharpe          float64             `json:"sharpe,omitempty"`
 	Orders          []SimulatedOrder    `json:"orders,omitempty"`
 	Positions       []SimulatedPosition `json:"positions,omitempty"`
+}
+
+type CurvePoint struct {
+	Time  string  `json:"time"`
+	Value float64 `json:"value"`
 }
 
 type DirectionMode string
@@ -111,6 +117,7 @@ func RunBacktest(ctx context.Context, cfg Config) (Result, error) {
 	unitCount := totalInjected
 	flows := make([]cashFlow, 0)
 	unitNAV := make([]float64, 0, len(cfg.Bars)-evalIndex)
+	equityCurve := make([]CurvePoint, 0, len(cfg.Bars)-evalIndex)
 	lastMonth := monthKey(barTime(firstEvalBar.OpenTime))
 
 	for i, bar := range cfg.Bars {
@@ -167,6 +174,7 @@ func RunBacktest(ctx context.Context, cfg Config) (Result, error) {
 		runtimeState = output.NextRuntime
 
 		equity := totalEquity(portfolio, bar.Close)
+		equityCurve = append(equityCurve, CurvePoint{Time: curveTime(bar.OpenTime), Value: equity})
 		if unitCount > 0 {
 			unitNAV = append(unitNAV, equity/unitCount)
 		} else {
@@ -183,6 +191,7 @@ func RunBacktest(ctx context.Context, cfg Config) (Result, error) {
 		TotalInjected: totalInjected,
 		ROI:           modifiedDietzROI(initialEquity, finalEquity, flows, start, end),
 		MaxDrawdown:   quant.MaxDrawdown(unitNAV),
+		EquityCurve:   equityCurve,
 	}, nil
 }
 
@@ -290,6 +299,7 @@ func runMarginBacktest(ctx context.Context, cfg Config) (Result, error) {
 		TotalInjected:   initialEquity,
 		ROI:             simpleROI(initialEquity, finalEquity),
 		MaxDrawdown:     quant.MaxDrawdown(equityCurve),
+		EquityCurve:     curvePoints(cfg.Bars[evalIndex:], equityCurve),
 		RealizedPnL:     account.realizedPnL,
 		Fees:            account.fees,
 		TradeCount:      account.trades,
@@ -299,6 +309,25 @@ func runMarginBacktest(ctx context.Context, cfg Config) (Result, error) {
 		Orders:          account.orders,
 		Positions:       account.simulatedPositions(finalPrice),
 	}, nil
+}
+
+func curveTime(openTimeMs int64) string {
+	return time.UnixMilli(openTimeMs).UTC().Format(time.RFC3339)
+}
+
+func curvePoints(bars []quant.Bar, values []float64) []CurvePoint {
+	limit := len(values)
+	if len(bars) < limit {
+		limit = len(bars)
+	}
+	points := make([]CurvePoint, 0, limit)
+	for i := 0; i < limit; i++ {
+		if values[i] <= 0 || math.IsNaN(values[i]) || math.IsInf(values[i], 0) {
+			continue
+		}
+		points = append(points, CurvePoint{Time: curveTime(bars[i].OpenTime), Value: values[i]})
+	}
+	return points
 }
 
 func normalizeDirection(direction DirectionMode) DirectionMode {

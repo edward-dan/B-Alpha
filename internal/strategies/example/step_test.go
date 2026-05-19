@@ -107,6 +107,10 @@ func TestStepHardReleaseEnablesMinimumSell(t *testing.T) {
 }
 
 func TestParseParamPack(t *testing.T) {
+	if DefaultParams().SpawnPoint.InitialAvailableUSDT <= 0 {
+		t.Fatal("default params should provide initial virtual capital for runnable backtests")
+	}
+
 	raw, err := json.Marshal(Params{
 		Chromosome: quant.Chromosome{Beta: 100},
 		SpawnPoint: quant.SpawnPoint{
