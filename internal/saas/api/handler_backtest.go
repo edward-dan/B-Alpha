@@ -122,7 +122,7 @@ func (h *BacktestHandler) CreateBacktest(c *gin.Context) {
 		run.Status = store.BacktestRunFailed
 		run.Error = err.Error()
 		run.FinishedAt = &finishedAt
-		c.JSON(http.StatusBadRequest, gin.H{"backtest": run})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "backtest": run})
 		return
 	}
 

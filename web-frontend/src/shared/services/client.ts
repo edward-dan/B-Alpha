@@ -68,5 +68,12 @@ function extractErrorMessage(data: unknown) {
     const message = (data as { message?: unknown }).message;
     return typeof message === "string" ? message : undefined;
   }
+  if (data && typeof data === "object" && "backtest" in data) {
+    const backtest = (data as { backtest?: unknown }).backtest;
+    if (backtest && typeof backtest === "object" && "error" in backtest) {
+      const error = (backtest as { error?: unknown }).error;
+      return typeof error === "string" ? error : undefined;
+    }
+  }
   return undefined;
 }
