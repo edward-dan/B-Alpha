@@ -30,9 +30,12 @@ export const useAuthStore = create<AuthStore>()(
           return null;
         }
         set({ loading: true });
+        const controller = new AbortController();
+        const timeoutID = window.setTimeout(() => controller.abort(), 8_000);
         try {
           const response = await fetch("/api/v1/auth/me", {
-            headers: { Authorization: `Bearer ${token}` }
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal
           });
           if (!response.ok) throw new Error(response.statusText);
           const data = (await response.json()) as { user: User };
@@ -41,6 +44,8 @@ export const useAuthStore = create<AuthStore>()(
         } catch {
           set({ token: null, user: null, loading: false });
           return null;
+        } finally {
+          window.clearTimeout(timeoutID);
         }
       }
     }),

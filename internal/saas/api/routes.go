@@ -70,7 +70,9 @@ func RegisterStaticFrontend(router *gin.Engine, distDir string) {
 	}
 	assetsPath := filepath.Join(distDir, "assets")
 	if _, err := os.Stat(assetsPath); err == nil {
-		router.Static("/assets", assetsPath)
+		assetHandler := staticAssetHandler(assetsPath)
+		router.GET("/assets/*filepath", assetHandler)
+		router.HEAD("/assets/*filepath", assetHandler)
 	}
 	router.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -78,6 +80,17 @@ func RegisterStaticFrontend(router *gin.Engine, distDir string) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
 		c.File(indexPath)
 	})
+}
+
+func staticAssetHandler(assetsPath string) gin.HandlerFunc {
+	fileSystem := http.Dir(assetsPath)
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		c.FileFromFS(strings.TrimPrefix(c.Param("filepath"), "/"), fileSystem)
+	}
 }
