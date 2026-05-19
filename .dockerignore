@@ -1,0 +1,9 @@
+.git
+.gitignore
+.dockerignore
+config.agent.yaml
+*.env
+*.exe
+bin/
+web-frontend/node_modules/
+web-frontend/dist/

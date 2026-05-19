@@ -1,0 +1,32 @@
+# B-Alpha runtime configuration template.
+# Secret values are intentionally blank. Inject them through environment
+# variables in each runtime environment.
+
+app_role: dev # allowed: saas, lab, dev
+
+database:
+  host: localhost
+  port: 5432
+  user: b_alpha
+  password: "" # inject with B_ALPHA_DB_PASSWORD
+  name: b_alpha
+  ssl_mode: disable
+  timezone: Asia/Shanghai
+  max_open_conns: 20
+  max_idle_conns: 5
+  conn_max_lifetime_seconds: 1800
+
+redis:
+  addr: localhost:6379
+  password: "" # inject with B_ALPHA_REDIS_PASSWORD when needed
+  db: 0
+
+jwt:
+  secret: "" # required at runtime; inject with B_ALPHA_JWT_SECRET
+  issuer: b-alpha
+  expires_in_seconds: 86400
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  mode: debug
