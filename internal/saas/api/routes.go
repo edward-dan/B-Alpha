@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"bian-trade-go/internal/saas/auth"
-	"bian-trade-go/internal/saas/config"
 	"bian-trade-go/internal/saas/epoch"
 	"bian-trade-go/internal/saas/instance"
 	"bian-trade-go/internal/saas/store"
@@ -52,9 +51,8 @@ func RegisterRoutes(router gin.IRouter, cfg RouterConfig) {
 	NewAgentHandler(cfg.Hub).RegisterRoutes(protected)
 	NewSystemHandler(cfg.Hub, appRole).RegisterRoutes(protected)
 
-	labOnly := protected.Group("", RequireAppRole(appRole, config.AppRoleLab, config.AppRoleDev))
-	NewEvolutionHandler(cfg.DB, cfg.Redis, cfg.EpochService, appRole).RegisterRoutes(labOnly)
-	NewBacktestHandler(cfg.DB, appRole).RegisterRoutes(labOnly)
+	NewEvolutionHandler(cfg.DB, cfg.Redis, cfg.EpochService).RegisterRoutes(protected)
+	NewBacktestHandler(cfg.DB).RegisterRoutes(protected)
 
 	if cfg.Hub != nil {
 		cfg.Hub.RegisterRoutes(router)

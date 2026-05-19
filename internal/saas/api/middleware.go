@@ -45,25 +45,6 @@ func JWTMiddleware(tokenService TokenService) gin.HandlerFunc {
 	}
 }
 
-func RequireAppRole(appRole string, allowed ...string) gin.HandlerFunc {
-	normalized := normalizeAppRole(appRole)
-	allowedSet := make(map[string]struct{}, len(allowed))
-	for _, role := range allowed {
-		role = normalizeAppRole(role)
-		if role != "" {
-			allowedSet[role] = struct{}{}
-		}
-	}
-
-	return func(c *gin.Context) {
-		if _, ok := allowedSet[normalized]; ok {
-			c.Next()
-			return
-		}
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "route is only available in lab/dev mode"})
-	}
-}
-
 func currentUserID(c *gin.Context) (uint, bool) {
 	value, ok := c.Get(contextUserIDKey)
 	if !ok {
@@ -96,8 +77,8 @@ func bearerToken(header string) string {
 
 func normalizeAppRole(role string) string {
 	role = strings.ToLower(strings.TrimSpace(role))
-	if role == "" {
-		return config.AppRoleDev
+	if role == config.AppRoleSaaS {
+		return role
 	}
-	return role
+	return config.AppRoleSaaS
 }

@@ -2,7 +2,7 @@
 # Secret values are intentionally blank. Inject them through environment
 # variables in each runtime environment.
 
-app_role: dev # allowed: saas, lab, dev
+app_role: saas
 
 database:
   host: localhost

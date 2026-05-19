@@ -12,8 +12,6 @@ import (
 
 const (
 	AppRoleSaaS = "saas"
-	AppRoleLab  = "lab"
-	AppRoleDev  = "dev"
 )
 
 type Config struct {
@@ -78,9 +76,9 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) Validate() error {
 	switch c.AppRole {
-	case AppRoleSaaS, AppRoleLab, AppRoleDev:
+	case AppRoleSaaS:
 	default:
-		return fmt.Errorf("invalid app_role %q: allowed values are %q, %q, %q", c.AppRole, AppRoleSaaS, AppRoleLab, AppRoleDev)
+		return fmt.Errorf("invalid app_role %q: allowed value is %q", c.AppRole, AppRoleSaaS)
 	}
 
 	if c.Database.Port <= 0 {
@@ -136,7 +134,7 @@ func pgConnValue(value string) string {
 
 func defaultConfig() *Config {
 	return &Config{
-		AppRole: AppRoleDev,
+		AppRole: AppRoleSaaS,
 		Database: DatabaseConfig{
 			Host:                   "localhost",
 			Port:                   5432,

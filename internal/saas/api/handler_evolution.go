@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"bian-trade-go/internal/saas/config"
 	"bian-trade-go/internal/saas/epoch"
 	"bian-trade-go/internal/saas/store"
 	"bian-trade-go/internal/strategies/example"
@@ -20,7 +19,6 @@ type EvolutionHandler struct {
 	db           *gorm.DB
 	redis        *store.Redis
 	epochService *epoch.EpochService
-	appRole      string
 }
 
 type promoteRequest struct {
@@ -29,12 +27,11 @@ type promoteRequest struct {
 	Reason         string `json:"reason"`
 }
 
-func NewEvolutionHandler(db *gorm.DB, redis *store.Redis, epochService *epoch.EpochService, appRole string) *EvolutionHandler {
+func NewEvolutionHandler(db *gorm.DB, redis *store.Redis, epochService *epoch.EpochService) *EvolutionHandler {
 	return &EvolutionHandler{
 		db:           db,
 		redis:        redis,
 		epochService: epochService,
-		appRole:      appRole,
 	}
 }
 
@@ -49,9 +46,6 @@ func (h *EvolutionHandler) RegisterRoutes(router gin.IRouter) {
 }
 
 func (h *EvolutionHandler) CreateEvolutionTask(c *gin.Context) {
-	if !h.labOrDev(c) {
-		return
-	}
 	if h.epochService == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "evolution service is not initialized"})
 		return
@@ -70,9 +64,6 @@ func (h *EvolutionHandler) CreateEvolutionTask(c *gin.Context) {
 }
 
 func (h *EvolutionHandler) ListEvolutionTasks(c *gin.Context) {
-	if !h.labOrDev(c) {
-		return
-	}
 	if h.epochService == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "evolution service is not initialized"})
 		return
@@ -86,9 +77,6 @@ func (h *EvolutionHandler) ListEvolutionTasks(c *gin.Context) {
 }
 
 func (h *EvolutionHandler) CancelEvolutionTask(c *gin.Context) {
-	if !h.labOrDev(c) {
-		return
-	}
 	if h.epochService == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "evolution service is not initialized"})
 		return
@@ -106,9 +94,6 @@ func (h *EvolutionHandler) CancelEvolutionTask(c *gin.Context) {
 }
 
 func (h *EvolutionHandler) PromoteEvolutionTask(c *gin.Context) {
-	if !h.labOrDev(c) {
-		return
-	}
 	if !requireDB(c, h.db) {
 		return
 	}
@@ -199,9 +184,6 @@ func (h *EvolutionHandler) PromoteEvolutionTask(c *gin.Context) {
 }
 
 func (h *EvolutionHandler) ListGenomes(c *gin.Context) {
-	if !h.labOrDev(c) {
-		return
-	}
 	if !requireDB(c, h.db) {
 		return
 	}
@@ -237,9 +219,6 @@ func (h *EvolutionHandler) ListGenomes(c *gin.Context) {
 }
 
 func (h *EvolutionHandler) GetChampionGenome(c *gin.Context) {
-	if !h.labOrDev(c) {
-		return
-	}
 	if !requireDB(c, h.db) {
 		return
 	}
@@ -285,9 +264,6 @@ func (h *EvolutionHandler) GetChampionGenome(c *gin.Context) {
 }
 
 func (h *EvolutionHandler) ListChallengerGenomes(c *gin.Context) {
-	if !h.labOrDev(c) {
-		return
-	}
 	if !requireDB(c, h.db) {
 		return
 	}
@@ -316,16 +292,6 @@ func (h *EvolutionHandler) ListChallengerGenomes(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"challengers": challengers})
-}
-
-func (h *EvolutionHandler) labOrDev(c *gin.Context) bool {
-	switch normalizeAppRole(h.appRole) {
-	case config.AppRoleLab, config.AppRoleDev:
-		return true
-	default:
-		c.JSON(http.StatusForbidden, gin.H{"error": "evolution routes are only available in lab/dev mode"})
-		return false
-	}
 }
 
 func ChampionCacheKey(strategyID string, symbol string) string {

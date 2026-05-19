@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"bian-trade-go/internal/saas/config"
 	saasws "bian-trade-go/internal/saas/ws"
 	"github.com/gin-gonic/gin"
 )
@@ -37,7 +36,7 @@ func (h *SystemHandler) GetStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"engine_state":          "running",
 		"app_role":              h.appRole,
-		"features":              featuresForRole(h.appRole),
+		"features":              featuresForSaaS(),
 		"agent_connected":       connected,
 		"api_connected":         connected,
 		"api_configured":        connected,
@@ -49,19 +48,13 @@ func (h *SystemHandler) GetStatus(c *gin.Context) {
 	})
 }
 
-func featuresForRole(role string) gin.H {
-	base := gin.H{
-		"dashboard": true,
-		"agents":    true,
-		"settings":  true,
+func featuresForSaaS() gin.H {
+	return gin.H{
+		"dashboard":   true,
+		"strategies":  true,
+		"agents":      true,
+		"risk":        true,
+		"backtesting": true,
+		"settings":    true,
 	}
-	switch normalizeAppRole(role) {
-	case config.AppRoleLab, config.AppRoleDev:
-		base["strategies"] = true
-		base["backtesting"] = true
-	default:
-		base["strategies"] = false
-		base["backtesting"] = false
-	}
-	return base
 }

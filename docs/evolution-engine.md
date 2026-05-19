@@ -236,7 +236,7 @@ EvaluablePlan
 
 `DataCoverage` 必须记录历史数据起止时间、最新 closed bar 时间、每个窗口评分起点和 warmup 起点。任何回测报告都应能说明评分使用了哪段数据。
 
-构建 `EvaluablePlan` 前必须完成公共行情覆盖检查。若 `market_klines` 中缺少目标交易对、周期或窗口所需 closed bars，Lab 可以先通过 Binance 正式公开历史 K 线 API 补齐缺口；补齐完成后仍无法满足窗口覆盖要求时，进化任务或回测任务必须失败，不能用残缺窗口计算适应度。
+构建 `EvaluablePlan` 前必须完成公共行情覆盖检查。若 `market_klines` 中缺少目标交易对、周期或窗口所需 closed bars，SaaS 可以先通过 Binance 正式公开历史 K 线 API 补齐缺口；补齐完成后仍无法满足窗口覆盖要求时，进化任务或回测任务必须失败，不能用残缺窗口计算适应度。
 
 多币种回测或多币种进化评估必须在计划中记录每个交易对的数据覆盖、周期、起止时间和缺口补齐结果。共享虚拟账户的回测报告需要同时保留组合级指标和单交易对明细，避免只展示汇总收益而丢失数据质量证据。
 
@@ -246,7 +246,7 @@ EvaluablePlan
 
 | 角色 | 含义 | 可写方 |
 |---|---|---|
-| `challenger` | 进化产出，等待人工审批 | Lab Evolution |
+| `challenger` | 进化产出，等待人工审批 | SaaS Evolution |
 | `champion` | 当前活跃冠军，可供实例绑定或更新 | 人工 Promote 事务 |
 | `retired` | 历史冠军，仅供审计和回溯 | 人工 Promote 事务 |
 
@@ -258,7 +258,7 @@ EvaluablePlan
 
 ## 第 7 章：HTTP 触发契约
 
-进化 HTTP 接口只在 `app_role=lab` 或 `app_role=dev` 下开放。`app_role=saas` 可以读取必要的报告，但不得创建或执行进化任务。
+进化 HTTP 接口在单一 `app_role=saas` 模式下开放给已认证用户。接口可以创建和执行进化任务，但不得下发真实交易指令，也不得自动 Promote 候选参数。
 
 ### 7.1 `POST /api/v1/evolution/tasks`
 

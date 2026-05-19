@@ -12,7 +12,6 @@ import (
 
 	"bian-trade-go/internal/adapters/backtest"
 	"bian-trade-go/internal/quant"
-	"bian-trade-go/internal/saas/config"
 	"bian-trade-go/internal/saas/marketdata"
 	"bian-trade-go/internal/saas/store"
 	"bian-trade-go/internal/strategies/example"
@@ -21,8 +20,7 @@ import (
 )
 
 type BacktestHandler struct {
-	db      *gorm.DB
-	appRole string
+	db *gorm.DB
 }
 
 type createBacktestRequest struct {
@@ -60,8 +58,8 @@ type dataCoverage struct {
 	Interval        string `json:"interval"`
 }
 
-func NewBacktestHandler(db *gorm.DB, appRole string) *BacktestHandler {
-	return &BacktestHandler{db: db, appRole: normalizeAppRole(appRole)}
+func NewBacktestHandler(db *gorm.DB) *BacktestHandler {
+	return &BacktestHandler{db: db}
 }
 
 func (h *BacktestHandler) RegisterRoutes(router gin.IRouter) {
@@ -70,9 +68,6 @@ func (h *BacktestHandler) RegisterRoutes(router gin.IRouter) {
 }
 
 func (h *BacktestHandler) CreateBacktest(c *gin.Context) {
-	if !h.labOrDev(c) {
-		return
-	}
 	if !requireDB(c, h.db) {
 		return
 	}
@@ -157,9 +152,6 @@ func (h *BacktestHandler) CreateBacktest(c *gin.Context) {
 }
 
 func (h *BacktestHandler) GetBacktest(c *gin.Context) {
-	if !h.labOrDev(c) {
-		return
-	}
 	if !requireDB(c, h.db) {
 		return
 	}
@@ -244,9 +236,12 @@ func (h *BacktestHandler) resolveBacktestRequest(c *gin.Context, req createBackt
 		return example.Params{}, req, fmt.Errorf("unsupported strategy %q: only %q is registered", req.StrategyID, example.StrategyID)
 	}
 	if len(req.ParamPack) == 0 {
-		return example.Params{}, req, errors.New("param_pack or gene_id is required")
-	}
-	if !json.Valid(req.ParamPack) {
+		defaultPack, err := json.Marshal(example.DefaultParams())
+		if err != nil {
+			return example.Params{}, req, fmt.Errorf("build default param_pack: %w", err)
+		}
+		req.ParamPack = defaultPack
+	} else if !json.Valid(req.ParamPack) {
 		return example.Params{}, req, errors.New("param_pack must be valid JSON")
 	}
 
@@ -561,14 +556,4 @@ func (h *BacktestHandler) loadBacktestBars(c *gin.Context, req createBacktestReq
 		return nil, fmt.Errorf("load backtest klines: no usable closed bars for %s %s", req.Symbol, req.Interval)
 	}
 	return bars, nil
-}
-
-func (h *BacktestHandler) labOrDev(c *gin.Context) bool {
-	switch normalizeAppRole(h.appRole) {
-	case config.AppRoleLab, config.AppRoleDev:
-		return true
-	default:
-		c.JSON(http.StatusForbidden, gin.H{"error": "backtest writes are only available in lab/dev mode"})
-		return false
-	}
 }

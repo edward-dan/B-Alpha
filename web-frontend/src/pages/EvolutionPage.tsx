@@ -85,8 +85,8 @@ export function EvolutionPage() {
   return (
     <div>
       <PageHeader
-        title="进化实验室"
-        description="在 Lab 或开发环境中触发参数优化，候选参数必须人工审批后才会成为当前最优参数。"
+        title="参数优化"
+        description="在 SaaS 控制台触发参数优化，候选参数必须人工审批后才会成为当前最优参数。"
       />
       <TabsList className="mb-5">
         <TabsTrigger active={tab === "optimize"} onClick={() => setTab("optimize")}>

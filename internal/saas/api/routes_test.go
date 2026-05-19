@@ -27,7 +27,7 @@ func TestProtectedAPIRoutesRequireJWT(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := NewRouter(RouterConfig{
 		TokenService: fakeTokenService{claims: &auth.Claims{UserID: 7, Role: "user"}},
-		AppRole:      config.AppRoleDev,
+		AppRole:      config.AppRoleSaaS,
 	})
 
 	w := httptest.NewRecorder()
@@ -39,7 +39,7 @@ func TestProtectedAPIRoutesRequireJWT(t *testing.T) {
 	}
 }
 
-func TestLabRoutesRequireLabOrDevAppRole(t *testing.T) {
+func TestEvolutionRoutesUseSaaSMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := NewRouter(RouterConfig{
 		TokenService: fakeTokenService{claims: &auth.Claims{UserID: 7, Role: "user"}},
@@ -51,7 +51,7 @@ func TestLabRoutesRequireLabOrDevAppRole(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for lab route in saas app_role, got %d", w.Code)
+	if w.Code == http.StatusForbidden {
+		t.Fatalf("expected evolution route to be available in saas app_role, got %d", w.Code)
 	}
 }

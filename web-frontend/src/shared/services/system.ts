@@ -23,8 +23,8 @@ export const systemService = {
       if (error instanceof ApiRequestError && error.status === 404) {
         return {
           engine_state: "running",
-          app_role: "dev",
-          features: { dashboard: true, strategies: true, agents: true, backtesting: true, settings: true },
+          app_role: "saas",
+          features: { dashboard: true, strategies: true, agents: true, risk: true, backtesting: true, settings: true },
           agent_connected: false,
           api_connected: false,
           api_configured: false,

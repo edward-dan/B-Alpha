@@ -1,4 +1,4 @@
-export type AppRole = "saas" | "lab" | "dev";
+export type AppRole = "saas";
 
 export type AppFeature = "dashboard" | "strategies" | "agents" | "risk" | "backtesting" | "settings";
 export type FeatureKey = AppFeature;

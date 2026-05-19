@@ -59,7 +59,7 @@ export function BacktestingPage() {
     <div>
       <PageHeader
         title="回测触发与结果展示"
-        description="回测只在 Lab 或开发环境开放，并通过与实盘一致的策略决策入口执行。"
+        description="回测在 SaaS 控制台开放，并通过与实盘一致的策略决策入口执行。"
       />
       <div className="grid gap-4 xl:grid-cols-[0.75fr_1.25fr]">
         <Card>

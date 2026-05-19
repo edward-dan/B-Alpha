@@ -4,7 +4,7 @@
 
 ## 第 0 章：架构哲学
 
-系统采用 SaaS、Agent、Lab 三端分工：SaaS 是决策与状态真源，Agent 是用户本地执行端，Lab 是离线计算端。三端通过明确的状态所有权和消息协议协作，避免任何一端偷偷承担不属于自己的职责。
+系统采用 SaaS、Agent 两端分工：SaaS 是决策、状态、回测和进化任务真源，Agent 是用户本地执行端。两端通过明确的状态所有权和消息协议协作，避免任何一端偷偷承担不属于自己的职责。
 
 所有业务推进必须被封装为离散动作。每次动作读取当前状态快照，产出确定性的下一步意图；动作之间不能依赖进程内隐式记忆、未持久化变量或“上一轮碰巧留下”的临时状态。
 
@@ -12,15 +12,15 @@
 
 系统不做预防性解耦。当前阶段只保持 SaaS、Strategy、Agent 三层边界清楚，不为了未来不确定需求引入额外服务、事件总线或复杂插件框架。Redis 只缓存，不承担业务状态真源或跨端信号通道。
 
-## 第 1 章：三端物理部署形态
+## 第 1 章：两端物理部署形态
 
 ### 1.1 SaaS 云端
 
-SaaS 云端是系统的状态中心和策略执行中心。它负责用户认证、实例管理、策略参数包管理、调度 `RUNNING` 实例、构造 `StrategyInput`、调用 `Step()`、把 `StrategyOutput` 翻译为 `TradeCommand`，并通过 WebSocket 下发给对应 Agent。
+SaaS 云端是系统的状态中心、策略执行中心和离线评估入口。它负责用户认证、实例管理、策略参数包管理、调度 `RUNNING` 实例、构造 `StrategyInput`、调用 `Step()`、把 `StrategyOutput` 翻译为 `TradeCommand`，并通过 WebSocket 下发给对应 Agent。
 
 SaaS 云端持有 Postgres 和 Redis 连接，但永不持有交易所 API Key。所有交易所私有接口调用都必须发生在 Agent 用户本地，SaaS 只能通过 Agent 上报的 `DeltaReport` 收敛真实资产状态。
 
-SaaS 云端在 `app_role=saas` 下禁止创建和执行进化任务，禁止运行离线回测写接口。它可以读取冠军参数和历史报告，但不能把云端生产进程变成算力实验室。
+SaaS 云端统一以 `app_role=saas` 运行。系统不再提供 `lab` 或 `dev` 运行模式；进化任务、历史回测、挑战者参数包写入、基因库管理和回测报告都在 SaaS 侧通过已认证 API 暴露，并继续遵守真实交易执行隔离。
 
 ### 1.2 Agent 用户本地
 
@@ -30,27 +30,23 @@ Agent 不含策略代码，不连接数据库，不做自主交易决策。它�
 
 Agent 断线后必须指数退避重连，重连成功后立即发送当前余额快照。Agent 不需要恢复本地策略状态，因为策略状态真源在 SaaS 侧持久化，端侧只提供可验证的执行结果和账户快照。
 
-### 1.3 Lab 算力机
+### 1.3 SaaS 内置离线评估能力
 
-Lab 是本地或专用算力环境中的实验端，使用 `app_role=lab` 运行。它连接同一个 Postgres，但只开放 GA 进化、回测评估、挑战者参数包写入和基因库管理能力。
+SaaS 内置 GA 进化、回测评估、挑战者参数包写入和基因库管理能力。这些能力可以复用 SaaS 的模型、仓储、策略适配和回测适配，但不能绕过 `Step()` 直接调用策略内部函数。所有历史评估都必须通过与实盘同构的 `Step()` 契约执行。
 
-Lab 禁止下发真实交易指令，禁止启动或停止生产实例，禁止触发 Agent 执行。Lab 产出的结果只能以 `challenger` 角色写入数据库，等待人工审阅后 Promote 为 `champion`。
+离线评估禁止下发真实交易指令，禁止触发 Agent 执行。进化产出的结果只能以 `challenger` 角色写入数据库，等待人工审阅后 Promote 为 `champion`。
 
-Lab 可以复用 SaaS 的模型、仓储、策略适配和回测适配，但不能绕过 `Step()` 直接调用策略内部函数。所有历史评估都必须通过与实盘同构的 `Step()` 契约执行。
+SaaS 回测允许用户在一次任务中选择多个交易对、统一 K 线周期、起止时间、方向模式和杠杆倍数。方向模式至少包含 `long`、`short`、`long_short` 三种语义；杠杆必须是正整数，系统级防呆上限为 `100x`。快捷选择为 `3x`、`5x`、`10x`，自定义输入也不得突破系统上限。
 
-Lab 回测允许用户在一次任务中选择多个交易对、统一 K 线周期、起止时间、方向模式和杠杆倍数。方向模式至少包含 `long`、`short`、`long_short` 三种语义；杠杆必须是正整数，系统级防呆上限为 `100x`。快捷选择为 `3x`、`5x`、`10x`，自定义输入也不得突破系统上限。
+SaaS 回测使用 Binance 正式公开 K 线 API 作为缺失历史行情补全来源。该接口只允许访问公开历史行情，不需要也不得读取 `config.agent.yaml` 中的 API Key；任何私有账户、下单、余额或合约账户接口仍然只属于 Agent 边界，SaaS 回测不得调用。
 
-Lab 回测使用 Binance 正式公开 K 线 API 作为缺失历史行情补全来源。该接口只允许访问公开历史行情，不需要也不得读取 `config.agent.yaml` 中的 API Key；任何私有账户、下单、余额或合约账户接口仍然只属于 Agent 边界，Lab 回测不得调用。
+## 第 2 章：单一 SaaS 运行模式
 
-## 第 2 章：app_role 三态行为矩阵
-
-`app_role` 是进程级能力闸门，不是用户权限替代品。用户权限负责谁能操作，`app_role` 负责当前物理部署形态是否允许某类能力存在。路由层、服务层和调度入口都必须遵守该矩阵。
+`app_role` 只保留 `saas`。它不再是三态能力闸门，也不再承担功能开关职责；谁能操作由用户认证、订阅额度和后续权限模型决定，当前进程形态始终是 SaaS。
 
 | app_role | 部署场景 | 开放能力 | 限制能力 | 禁区 |
 |---|---|---|---|---|
-| `saas` | 云端生产 SaaS | 用户认证、订阅校验、策略模板读取、实例创建/启动/停止、Cron Tick、`Step()` 执行、WebSocket 指令下发、Agent 上报处理、冠军参数读取 | 可读取进化结果和历史回测报告 | 禁止创建/执行 GA 进化任务；禁止回测写接口；禁止保存或接收 API Key |
-| `lab` | 本地或专用算力机 | GA 进化任务、历史回测、挑战者参数包写入、基因库读取与管理、只读查看实例与冠军 | 可读取生产状态用于构造评估上下文 | 禁止真实交易指令下发；禁止实例启停；禁止 Agent 私有接口执行；禁止把 challenger 自动提升为 champion |
-| `dev` | 本地开发测试 | SaaS、Lab、Agent 相关开发入口可全部启用 | 必须显式使用开发配置和测试凭证 | 禁止连接真实生产交易所密钥；禁止以 dev 配置操作生产数据库，除非人工明确授权 |
+| `saas` | SaaS 服务进程 | 用户认证、订阅校验、策略模板读取、实例创建/启动/停止、Cron Tick、`Step()` 执行、WebSocket 指令下发、Agent 上报处理、冠军参数读取、GA 进化任务、历史回测、挑战者参数包写入、基因库读取与管理、回测报告 | 离线评估只能写 `challenger` 和 `bt_`/`market_klines` 相关数据，不得影响真实成交事实 | 禁止保存或接收 API Key；禁止调用交易所私有接口；禁止离线评估下发真实交易指令；禁止把 challenger 自动提升为 champion |
 
 ## 第 3 章：逻辑模块与职责边界
 
@@ -97,24 +93,24 @@ SaaS 收到 Agent 上报后更新状态，下一次 `Step()` 基于最新持久�
 | 数据类别 | 真源位置 | 写入方 | 读取方 | 说明 |
 |---|---|---|---|---|
 | 用户、订阅、权限 | Postgres | SaaS Auth | SaaS API、调度入口 | 用户身份与配额统一由 SaaS 管理 |
-| 策略模板元数据 | Postgres + 代码版本 | SaaS 管理流程 | SaaS、Lab | 模板必须对应代码中的 `StrategyID` 和版本 |
-| `Step()` 数学契约 | `docs/strategy-math-engine.md` + 策略代码 | 文档与代码变更流程 | SaaS、Lab 回测适配 | 回测与实盘唯一入口 |
+| 策略模板元数据 | Postgres + 代码版本 | SaaS 管理流程 | SaaS | 模板必须对应代码中的 `StrategyID` 和版本 |
+| `Step()` 数学契约 | `docs/strategy-math-engine.md` + 策略代码 | 文档与代码变更流程 | SaaS、回测适配 | 回测与实盘唯一入口 |
 | 冠军参数包 `champion` | Postgres，Redis 可缓存 | Promote 事务 | SaaS Tick、实例创建 | Redis 命中仅是缓存，DB 是真源 |
-| 挑战者参数包 `challenger` | Postgres | Lab Evolution | Lab、SaaS 只读、人工审批 | 不自动进入生产 |
-| 历史基因 `retired` | Postgres | Promote 事务 | Lab、审计 | 只读存档 |
+| 挑战者参数包 `challenger` | Postgres | SaaS Evolution | SaaS、人工审批 | 不自动进入生产 |
+| 历史基因 `retired` | Postgres | Promote 事务 | SaaS、审计 | 只读存档 |
 | 运行中实例状态 | Postgres | SaaS Instance | SaaS Tick、前端 | `RUNNING`/`STOPPED`/`ERROR` 等状态 |
-| Portfolio State | Postgres | SaaS 根据 `DeltaReport` 和语义转换更新 | SaaS `Step()`、Lab 回放 | 真实余额上报 + SaaS 语义账本收敛 |
+| Portfolio State | Postgres | SaaS 根据 `DeltaReport` 和语义转换更新 | SaaS `Step()`、回测回放 | 真实余额上报 + SaaS 语义账本收敛 |
 | Runtime State | Postgres | SaaS `Step()` 后持久化 | SaaS `Step()`、回测适配 | 策略运行状态快照，不由 Agent 写入 |
 | 交易指令 pending 记录 | Postgres | SaaS 下发前写入 | SaaS、审计 | 用 `client_order_id` 去重和回填 |
 | 成交明细与余额快照 | Postgres | SaaS 处理 Agent 上报 | SaaS、前端、审计 | Agent 是事实来源，SaaS 是持久化真源 |
 | Agent 连接状态 | SaaS 内存 + Redis 可辅助缓存 | WebSocket Hub | SaaS Tick | 连接状态可丢失，重连后自愈 |
 | 交易所 API Key | Agent 本地 `config.agent.yaml` | 用户本地 | Agent | 永不进入 SaaS、DB、日志和网络上行 |
-| 公共历史 K 线 | Postgres `market_klines` | Lab/SaaS 行情补全流程 | Lab 回测、进化评估、SaaS Tick | 只存公开行情；缺口可由 Binance 公开 API 补齐 |
-| 回测虚拟账户 | Postgres `bt_account` | Lab 回测 | Lab、前端报告 | 只记录虚拟资金、余额、保证金和已实现盈亏 |
-| 回测委托订单 | Postgres `bt_orders` | Lab 回测 | Lab、前端报告 | 记录买卖方向、开平标志、仓位方向、杠杆、成交与手续费 |
-| 回测当前持仓 | Postgres `bt_positions` | Lab 回测 | Lab、前端报告 | 记录多/空持仓、均价、数量、保证金、未实现盈亏和预估强平价 |
-| 回测运行日志 | Postgres `bt_trade_logs` | Lab 回测 | Lab、审计 | 记录策略触发细节、错误和执行过程 |
-| 回测绩效报告 | Postgres `bt_reports` | Lab 回测 | Lab、SaaS 只读、前端报告 | 保存参数快照、收益、回撤、胜率、盈亏比、夏普和执行耗时 |
+| 公共历史 K 线 | Postgres `market_klines` | SaaS 行情补全流程 | 回测、进化评估、SaaS Tick | 只存公开行情；缺口可由 Binance 公开 API 补齐 |
+| 回测虚拟账户 | Postgres `bt_account` | SaaS 回测 | SaaS、前端报告 | 只记录虚拟资金、余额、保证金和已实现盈亏 |
+| 回测委托订单 | Postgres `bt_orders` | SaaS 回测 | SaaS、前端报告 | 记录买卖方向、开平标志、仓位方向、杠杆、成交与手续费 |
+| 回测当前持仓 | Postgres `bt_positions` | SaaS 回测 | SaaS、前端报告 | 记录多/空持仓、均价、数量、保证金、未实现盈亏和预估强平价 |
+| 回测运行日志 | Postgres `bt_trade_logs` | SaaS 回测 | SaaS、审计 | 记录策略触发细节、错误和执行过程 |
+| 回测绩效报告 | Postgres `bt_reports` | SaaS 回测 | SaaS、前端报告 | 保存参数快照、收益、回撤、胜率、盈亏比、夏普和执行耗时 |
 
 ## 第 5 章：WebSocket 通信协议
 
@@ -216,13 +212,13 @@ SaaS 收到 `SIGTERM` 或等效关闭信号后，先停止接收新的 API 写�
 
 Agent 停机时应停止读取新命令，尽量完成已接收命令的最终上报，并关闭 WebSocket。若无法完成，上报幂等键和交易所订单号必须保留在本地恢复路径中，重启后继续上报。
 
-### 6.5 Lab 回测启动流程
+### 6.5 SaaS 回测启动流程
 
-用户点击“开始回测”后，Lab 必须先规范化参数：交易对统一为交易所符号格式，方向模式必须是 `long`、`short` 或 `long_short`，杠杆必须为 `1..100` 的整数，周期必须映射为明确的 K 线间隔，时间范围必须满足开始时间早于结束时间。
+用户点击“开始回测”后，SaaS 必须先规范化参数：交易对统一为交易所符号格式，方向模式必须是 `long`、`short` 或 `long_short`，杠杆必须为 `1..100` 的整数，周期必须映射为明确的 K 线间隔，时间范围必须满足开始时间早于结束时间。
 
-Lab 随后按交易对、周期和起止时间检查 `market_klines` 中的历史 K 线连续性。连续性按该周期的标准开盘时间步长判断，只允许使用完全闭合 K 线；缺失、重复、乱序或不完整时间段都必须在启动回测前处理。
+SaaS 随后按交易对、周期和起止时间检查 `market_klines` 中的历史 K 线连续性。连续性按该周期的标准开盘时间步长判断，只允许使用完全闭合 K 线；缺失、重复、乱序或不完整时间段都必须在启动回测前处理。
 
-若本地行情完整，Lab 直接初始化虚拟回测账户。若行情缺失，Lab 调用 Binance 正式公开历史 K 线 API 拉取缺口，清洗为标准 OHLCV 后写入 `market_klines`，再重新校验连续性。补全失败时，本次回测必须失败并写入可审计错误，不得用残缺数据继续评估。
+若本地行情完整，SaaS 直接初始化虚拟回测账户。若行情缺失，SaaS 调用 Binance 正式公开历史 K 线 API 拉取缺口，清洗为标准 OHLCV 后写入 `market_klines`，再重新校验连续性。补全失败时，本次回测必须失败并写入可审计错误，不得用残缺数据继续评估。
 
 虚拟账户初始化后，回测适配层按历史 closed bars 调用与实盘相同的 `Step()`。回测执行层负责把 `Step()` 输出的意图解释为虚拟订单、保证金占用、持仓更新、手续费、已实现盈亏、未实现盈亏和报告指标；策略包仍然不得感知回测、杠杆、数据库或 Binance 拉取流程。
 
@@ -234,7 +230,7 @@ Lab 随后按交易对、周期和起止时间检查 `market_klines` 中的历�
 
 1. 策略必须满足复利前置条件。资金规模、目标仓位或订单规模必须能随权益变化而滚动，不能只是一组固定金额脚本。
 2. 回测与实盘必须调用同一个 `Step()` 实现。`Step()` 内部禁止 `isBacktest`、`isLive` 等环境分叉。
-3. `Step()` 只在 SaaS 侧执行。Agent 二进制不包含策略计算代码，Lab 回测也通过 SaaS 同构适配调用 `Step()`。
+3. `Step()` 只在 SaaS 侧执行。Agent 二进制不包含策略计算代码，SaaS 回测也通过同构适配调用 `Step()`。
 4. 策略包内部禁止网络、数据库、文件 I/O、定时器和交易所 SDK。
 5. API Key 只能存在于 Agent 本地 `config.agent.yaml`，永不进入 SaaS、Postgres、Redis、日志、错误上报或 WebSocket 上行消息。
 6. 数据库结构遵守 GORM Code-First，只使用 `AutoMigrate` 管理模型结构，不维护 SQL migration 文件。
